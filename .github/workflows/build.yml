@@ -1,0 +1,110 @@
+name: Build GCC
+
+on:
+  push:
+    branches: [ "*" ]
+    tags:
+      - "*"
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get install -y zstd
+
+      - name: Restore GCC
+        id: cache-gcc-restore
+        uses: actions/cache/restore@v4
+        with:
+          key: gcc-15.2
+          path: ${{ github.workspace }}/gcc-15/install
+
+      - name: Build GCC 15.2
+        if: steps.cache-gcc-restore.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get install -y build-essential make gawk flex bison libgmp-dev libmpfr-dev libmpc-dev python3 binutils perl libisl-dev libzstd-dev gzip bzip2
+          mkdir gcc-15
+          cd gcc-15
+          git clone https://gcc.gnu.org/git/gcc.git -b releases/gcc-15.2.0 --depth 1 source
+          cd source
+          ./contrib/download_prerequisites
+          cd ..
+          mkdir build
+          cd build
+          ../source/configure --prefix=${{ github.workspace }}/gcc-15/install --disable-multilib --enable-languages=c,c++
+          make -j$(nproc)
+          make install
+
+      - name: Cache GCC
+        id: cache-gcc-save
+        if: always() && steps.cache-gcc-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          key: ${{ steps.cache-gcc-restore.outputs.cache-primary-key }}
+          path: ${{ github.workspace }}/gcc-15/install
+
+      - name: Strip debug symbols
+        working-directory: ${{ github.workspace }}/gcc-15/install
+        run: |        
+          strip -d ./bin/*
+          strip -d ./lib/gcc/x86_64-pc-linux-gnu/15.2.0/*.a
+          strip -d ./lib/gcc/x86_64-pc-linux-gnu/15.2.0/*.o
+          strip -d ./lib/gcc/x86_64-pc-linux-gnu/15.2.0/plugin/libcc1plugin.so.0.0.0
+          strip -d ./lib/gcc/x86_64-pc-linux-gnu/15.2.0/plugin/libcp1plugin.so.0.0.0
+          strip -d ./lib64/*.a
+          strip -d ./lib64/*.o
+          strip -d ./lib64/libasan.so.8.0.0
+          strip -d ./lib64/libatomic.so.1.2.0
+          strip -d ./lib64/libcc1.so.0.0.0
+          strip -d ./lib64/libgcc_s.so.1
+          strip -d ./lib64/libgomp.so.1.0.0
+          strip -d ./lib64/libhwasan.so.0.0.0
+          strip -d ./lib64/libitm.so.1.0.0
+          strip -d ./lib64/liblsan.so.0.0.0
+          strip -d ./lib64/libquadmath.so.0.0.0
+          strip -d ./lib64/libssp.so.0.0.0
+          strip -d ./lib64/libstdc++.so.6.0.34
+          strip -d ./lib64/libtsan.so.2.0.0
+          strip -d ./lib64/libubsan.so.1.0.0
+          strip -d ./libexec/gcc/x86_64-pc-linux-gnu/15.2.0/cc1
+          strip -d ./libexec/gcc/x86_64-pc-linux-gnu/15.2.0/cc1plus
+          strip -d ./libexec/gcc/x86_64-pc-linux-gnu/15.2.0/collect2
+          strip -d ./libexec/gcc/x86_64-pc-linux-gnu/15.2.0/g++-mapper-server
+          strip -d ./libexec/gcc/x86_64-pc-linux-gnu/15.2.0/liblto_plugin.so
+          strip -d ./libexec/gcc/x86_64-pc-linux-gnu/15.2.0/lto-wrapper
+          strip -d ./libexec/gcc/x86_64-pc-linux-gnu/15.2.0/lto1
+          strip -d ./libexec/gcc/x86_64-pc-linux-gnu/15.2.0/plugin/gengtype
+          strip -d ./libexec/gcc/x86_64-pc-linux-gnu/15.2.0/install-tools/fixincl
+
+      - name: Upload GCC artifact
+        uses: actions/upload-artifact@master
+        with:
+          name: gcc_15.2
+          path: ${{ github.workspace }}/gcc-15/install
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download Artifact
+        uses: actions/download-artifact@master
+        with:
+          name: gcc_15.2
+          path: ./gcc-15/
+
+      - name: Create GCC archive
+        run: |
+          tar -I 'zstd -19 -T0' -cf gcc-15.2.0.tar.zst gcc-15
+
+      - name: Publish Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release create --draft=false --notes="${{ github.ref_name }}" "${{ github.ref_name }}" ./gcc-15.2.0.tar.zst
