@@ -80,11 +80,15 @@ jobs:
           strip -d ./libexec/gcc/x86_64-pc-linux-gnu/15.2.0/plugin/gengtype
           strip -d ./libexec/gcc/x86_64-pc-linux-gnu/15.2.0/install-tools/fixincl
 
+      - name: Create GCC archive
+        run: |
+          tar -I 'zstd -19 -T0' -cf gcc-15.2.0.tar.zst -C gcc-15/install .
+
       - name: Upload GCC artifact
         uses: actions/upload-artifact@master
         with:
           name: gcc_15.2
-          path: ${{ github.workspace }}/gcc-15/install
+          path: ${{ github.workspace }}/gcc-15.2.0.tar.zst
 
   publish:
     if: github.ref_type == 'tag'
@@ -97,11 +101,7 @@ jobs:
         uses: actions/download-artifact@master
         with:
           name: gcc_15.2
-          path: ./gcc-15/
-
-      - name: Create GCC archive
-        run: |
-          tar -I 'zstd -19 -T0' -cf gcc-15.2.0.tar.zst gcc-15
+          path: .
 
       - name: Publish Release
         env:
